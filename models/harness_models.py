@@ -48,7 +48,50 @@ class NodeType(Enum):
     SPLICE = "SPLICE"
     GROUND = "GROUND"
     TERMINAL = "TERMINAL"
+    BREAKOUT = "BREAKOUT"
 
+class FastenerCategory(Enum):
+    CLIP = "Clip"
+    BRACKET = "Bracket"
+    BOLT = "Bolt"
+    NUT = "Nut"
+    WASHER = "Washer"
+    TIE = "Cable Tie"
+    GROMMET = "Grommet"
+    OTHER = "Other"
+
+class FastenerMaterial(Enum):
+    NYLON = "Nylon"
+    STEEL = "Steel"
+    STAINLESS_STEEL = "Stainless Steel"
+    ALUMINUM = "Aluminum"
+    PLASTIC = "Plastic"
+    RUBBER = "Rubber"
+
+@dataclass
+class FastenerType:
+    id: str
+    name: str
+    description: Optional[str] = None
+    category: FastenerCategory = FastenerCategory.CLIP
+    material: FastenerMaterial = FastenerMaterial.NYLON
+    default_size: Optional[str] = None
+
+@dataclass
+class Fastener:
+    id: str
+    harness_id: str
+    type: FastenerType
+    part_number: str
+    quantity: int = 1
+    position: Tuple[float, float] = (0.0, 0.0)
+    orientation: float = 0.0  # Rotation in degrees
+    size: Optional[str] = None
+    torque_nm: Optional[float] = None  # Torque specification
+    notes: Optional[str] = None
+    branch_id: Optional[str] = None  # If attached to a branch
+    distance_from_start_mm: Optional[float] = None  # Position along branch
+    node_id: Optional[str] = None  # If attached to a node
 @dataclass
 class Pin:
     """Represents a single cavity/pin within a connector."""
@@ -112,7 +155,7 @@ class HarnessBranch:
     protection_id: Optional[str] = None
     path_points: List[Tuple[float, float]] = field(default_factory=list)
     nodes: List[str] = field(default_factory=list)  # List of node IDs on this branch
-
+    
     def calculate_length(self) -> float:
         """Calculates the total length of the branch by summing the distance between path points."""
         if len(self.path_points) < 2:
@@ -135,6 +178,7 @@ class HarnessBranch:
         This is a simplified version that finds the closest path point.
         """
         node = nodes_dict.get(node_id)
+        
         if node is None:
             return None
 
@@ -187,7 +231,8 @@ class WiringHarness:
     branches: Dict[str, HarnessBranch] = field(default_factory=dict)
     protections: Dict[str, BranchProtection] = field(default_factory=dict)
     nodes: Dict[str, Node] = field(default_factory=dict)
-
+    fasteners: Dict[str, Fastener] = field(default_factory=dict)
+    fastener_types: Dict[str, FastenerType] = field(default_factory=dict)
     def get_connector_pins(self, connector_id: str) -> Dict[str, Pin]:
         """Get all pins for a specific connector."""
         connector = self.connectors.get(connector_id)
@@ -325,7 +370,37 @@ class WiringHarness:
                 bom['protections'][branch.protection_id]['quantity'] += branch_length
         
         return bom
-
+    def get_fasteners_for_branch(self, branch_id: str) -> List[Fastener]:
+        """Get all fasteners attached to a specific branch."""
+        return [f for f in self.fasteners.values() if f.branch_id == branch_id]
+    
+    def get_fasteners_for_node(self, node_id: str) -> List[Fastener]:
+        """Get all fasteners attached to a specific node."""
+        return [f for f in self.fasteners.values() if f.node_id == node_id]
+    
+    def generate_fastener_bom(self) -> Dict[str, Dict]:
+        """Generate Bill of Materials for fasteners."""
+        fastener_bom = {}
+        
+        for fastener in self.fasteners.values():
+            key = f"{fastener.part_number}_{fastener.size or ''}"
+            if key not in fastener_bom:
+                fastener_bom[key] = {
+                    'part_number': fastener.part_number,
+                    'type': fastener.type.name,
+                    'size': fastener.size,
+                    'quantity': 0,
+                    'torque': fastener.torque_nm,
+                    'locations': []
+                }
+            
+            fastener_bom[key]['quantity'] += fastener.quantity
+            if fastener.branch_id:
+                fastener_bom[key]['locations'].append(f"Branch {fastener.branch_id}")
+            elif fastener.node_id:
+                fastener_bom[key]['locations'].append(f"Node {fastener.node_id}")
+        
+        return fastener_bom
 # Example usage and testing
 if __name__ == "__main__":
     # Create a simple test harness
